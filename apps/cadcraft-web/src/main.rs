@@ -12,6 +12,8 @@
 #[cfg(target_arch = "wasm32")]
 pub mod download;
 #[cfg(target_arch = "wasm32")]
+mod autosave;
+#[cfg(target_arch = "wasm32")]
 mod host;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -36,6 +38,7 @@ mod web {
         Option<(crate::host::Bridge, crate::host::DirtyReport)>,
         Option<web_sys::MediaQueryList>,
         Option<String>,
+        crate::autosave::WebAutosave,
     );
 
     impl eframe::App for Shell {
@@ -49,6 +52,7 @@ mod web {
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
+            self.5.tick(&mut self.0, ctx);
             let drawing = self.0.session.state().ok();
             crate::push_title(&mut self.4, drawing.map(|d| d.title.as_str()), drawing.is_some_and(|d| d.is_dirty()), set_page_title);
             // `DirtyReport` suppresses duplicates, so reporting after every logic callback
@@ -140,6 +144,10 @@ mod web {
         }
         let app_bridge = bridge.clone();
         wasm_bindgen_futures::spawn_local(async move {
+            // Read the copies earlier tabs left before the app is built, so Drawing Recovery has
+            // them at launch. Embedded (`?host=parent`) the parent owns the drawings: no copies.
+            let startup = crate::autosave::open().await;
+            let mut startup = Some(startup);
             let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
             let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
@@ -197,7 +205,9 @@ mod web {
                             (bridge, crate::host::DirtyReport::default())
                         });
                         let reduced_motion = web_sys::window().and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten());
-                        Ok(Box::new(Shell(app, inbox, host, reduced_motion, None)))
+                        let Some(startup) = startup.take() else { return Err("recovery store missing".into()) };
+                        let recovery = crate::autosave::install(&mut app, startup);
+                        Ok(Box::new(Shell(app, inbox, host, reduced_motion, None, recovery)))
                     }),
                 )
                 .await;

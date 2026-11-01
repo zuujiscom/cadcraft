@@ -251,6 +251,19 @@ impl Autosaver {
         jobs
     }
 
+    /// [`Autosaver::plan`] writing every drawing with changes not yet autosaved now (the web build
+    /// calls this on its own timer and when the tab is hidden).
+    pub fn plan_urgent(&mut self, s: &Session, now: f64, dir: &str) -> Vec<Job> {
+        self.plan_with(s, now, 1, dir, true)
+    }
+
+    /// Drawing `uid`'s autosave was not stored: count it as not autosaved, so the next plan writes it again.
+    pub fn forget_written(&mut self, uid: u64) {
+        if let Some(t) = self.docs.get_mut(&uid) {
+            t.written = None;
+        }
+    }
+
     /// Seconds from `now` until the next autosave is due, if one is waiting.
     pub fn next_due(&self, now: f64, minutes: u32) -> Option<f64> {
         if minutes == 0 {
