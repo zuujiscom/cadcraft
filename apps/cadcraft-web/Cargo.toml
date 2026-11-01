@@ -32,6 +32,8 @@ serde_json = { workspace = true }
 web-sys = { version = "0.3", features = ["HtmlInputElement", "FileList", "File"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Crash-recovery copies in IndexedDB (craft-libs).
+craft-web-recovery = { git = "https://github.com/zuujiscom/craft-libs", branch = "web-recovery" }
 eframe = { workspace = true, features = ["persistence", "wgpu", "accesskit"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

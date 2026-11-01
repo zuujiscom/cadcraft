@@ -1,7 +1,9 @@
 //! Autosave and Drawing Recovery in the app. The engine decides what to write and writes it
 //! ([`cadcraft_engine::autosave`]); this runs it every frame, keeps SAVETIME, SAVEFILEPATH and ISAVEBAK with
 //! the preferences, and shows the Drawing Recovery list after a crash: each autosaved drawing can
-//! be opened (as an unsaved copy) or discarded. On the web there is no autosave yet.
+//! be opened (as an unsaved copy) or discarded. On the web the copies live in browser storage
+//! (the web app keeps them): it lists them here with their bytes ([`Recovery::data`]) and takes
+//! back what was discarded ([`Recovery::discarded`]); an opened copy is adopted by the autosaver.
 
 use cadcraft_engine::autosave::{self, Recoverable};
 use egui::{RichText, vec2};
@@ -56,6 +58,10 @@ pub struct GpuNotice {
 #[derive(Clone, Debug, Default)]
 pub struct Recovery {
     pub items: Vec<Recoverable>,
+    /// Web: the copy of each item not in a file, by its `path` (a browser-storage key).
+    pub data: std::collections::HashMap<String, Vec<u8>>,
+    /// Web: items discarded since the host last looked (their `path`).
+    pub discarded: Vec<String>,
 }
 
 impl CadApp {
@@ -77,8 +83,14 @@ impl CadApp {
     /// saved or closed, so a second crash doesn't lose it.
     pub fn recover_item(&mut self, i: usize) -> Result<(), String> {
         let item = self.recovery.items.get(i).cloned().ok_or("no such recovery file")?;
-        let r = self.run("recover", json!({ "path": item.path, "copy": true, "title": item.drawing }))?;
+        let params = match self.recovery.data.get(&item.path) {
+            // Kept in browser storage, not in a file: autosave copies are DXF.
+            Some(bytes) => json!({ "data": cadcraft_engine::cmd::file::base64_encode(bytes), "name": "autosave.dxf", "copy": true, "title": item.drawing }),
+            None => json!({ "path": item.path, "copy": true, "title": item.drawing }),
+        };
+        let r = self.run("recover", params)?;
         self.recovery.items.remove(i);
+        self.recovery.data.remove(&item.path);
         if let (Some(saver), Some(uid)) = (&mut self.autosave, r.get("uid").and_then(Value::as_u64)) {
             saver.adopt(&self.session, uid, &item.path);
         }
@@ -90,9 +102,13 @@ impl CadApp {
     /// Delete recovery item `i`'s file.
     pub fn discard_item(&mut self, i: usize) {
         if i < self.recovery.items.len() {
-            let _item = self.recovery.items.remove(i);
-            #[cfg(not(target_arch = "wasm32"))]
-            autosave::discard(&_item.path);
+            let item = self.recovery.items.remove(i);
+            if self.recovery.data.remove(&item.path).is_some() {
+                self.recovery.discarded.push(item.path);
+            } else {
+                #[cfg(not(target_arch = "wasm32"))]
+                autosave::discard(&item.path);
+            }
         }
     }
 
@@ -241,6 +257,8 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     }
     if later {
         app.recovery.items.clear();
+        // Web: the copies stay in browser storage and are offered again next time.
+        app.recovery.data.clear();
     }
     if open.is_some() || discard.is_some() || later {
         ctx.request_repaint();

@@ -831,6 +831,7 @@ dependencies = [
  "cadcraft-ui-egui",
  "craft-web-api",
  "craft-web-host",
+ "craft-web-recovery",
  "eframe",
  "egui",
  "js-sys",
@@ -1252,6 +1253,18 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=fd5e2feff6ea25bed371a99cc732b3968d621505#fd5e2feff6ea25bed371a99cc732b3968d621505"
 dependencies = [
  "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "craft-web-recovery"
+version = "0.1.0"
+source = "git+https://github.com/zuujiscom/craft-libs?branch=web-recovery#fd0185e93481032512b73a87c836ff3fa7b8c2b6"
+dependencies = [
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
