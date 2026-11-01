@@ -186,6 +186,11 @@ mod web {
                         if let Some(prefs) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::PREFS_KEY)) {
                             app.load_prefs(&prefs);
                         }
+                        // Restoring the saved system variables edits the new drawing; it has no unsaved
+                        // changes of the user's, so it must not look dirty (no copy, no "Leave site?").
+                        if let Ok(st) = app.session.state_mut() {
+                            st.saved = st.doc.clone();
+                        }
                         if let Some(layout) = cc.storage.and_then(|s| s.get_string(crate::panel_layout::KEY))
                             && let Err(error) = crate::panel_layout::restore(&mut app.ui, &layout)
                         {
