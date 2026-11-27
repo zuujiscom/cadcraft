@@ -65,11 +65,23 @@ impl Pending {
 }
 
 impl CadApp {
+    /// Where there is no file system (the web), a drawing opened from its contents has no path
+    /// but still has a file: the DWG, DXF or DWT it came as. Its name, when Save writes that file.
+    pub(crate) fn own_file_name(&self) -> Option<String> {
+        if !self.services.no_file_system {
+            return None;
+        }
+        let st = self.session.state().ok().filter(|st| st.path.is_none())?;
+        let extension = std::path::Path::new(&st.title).extension()?;
+        ["dwg", "dxf", "dwt"].iter().any(|d| extension.eq_ignore_ascii_case(d)).then(|| st.title.clone())
+    }
+
     /// Hold a user's QSAVE of the active drawing if it would lose content the user hasn't agreed
     /// to lose, and ask. Returns whether it was held.
     pub fn hold_lossy_save(&mut self) -> bool {
+        let own = self.own_file_name();
         let Ok(st) = self.session.state() else { return false };
-        let (uid, Some(path)) = (st.uid, st.path.clone()) else { return false };
+        let (uid, Some(path)) = (st.uid, st.path.clone().or(own)) else { return false };
         let lost = loss_on_save(&self.session, &path);
         if lost.is_empty() {
             return false;
@@ -95,8 +107,10 @@ impl CadApp {
             }
             (Choice::SaveAnyway, Some(i)) => {
                 self.activate_doc(i);
+                // A drawing opened from its contents has no path for QSAVE to find.
+                let params = self.own_file_name().map_or_else(|| json!({}), |name| json!({ "path": name }));
                 self.save_loss_accepted = Some(loss);
-                let _ = self.run("qsave", json!({}));
+                let _ = self.run("qsave", params);
             }
         }
     }
@@ -115,6 +129,16 @@ pub fn prompt(app: &mut CadApp, ctx: &egui::Context) {
     let path = std::path::Path::new(pending.path());
     let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| pending.path().to_string());
     let backup = backup_path(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // Without a file system there is no file on disk, and no backup, to speak of.
+    let on_disk = (!app.services.no_file_system).then(|| {
+        if save_keeps_current(path) {
+            crate::tf!("The current file is kept as {name} until the next save.", name = backup)
+        } else if isavebak() {
+            crate::tf!("The current file doesn't look whole, so {name} stays as it is and the current file will be replaced.", name = backup)
+        } else {
+            crate::tl!("Backup copies are off, so the current file will be replaced.").to_string()
+        }
+    });
     let mut choice = None;
     crate::modal::instant(ctx, egui::Id::unique("cc_save_loss_prompt")).show(ctx, |ui| {
         ui.set_width(420.0);
@@ -127,14 +151,9 @@ pub fn prompt(app: &mut CadApp, ctx: &egui::Context) {
             crate::tl!("DXF keeps them. Use Save As to keep them in the drawing.")
         };
         ui.label(RichText::new(keeps).color(t.text_dim));
-        let on_disk = if save_keeps_current(path) {
-            crate::tf!("The current file is kept as {name} until the next save.", name = backup)
-        } else if isavebak() {
-            crate::tf!("The current file doesn't look whole, so {name} stays as it is and the current file will be replaced.", name = backup)
-        } else {
-            crate::tl!("Backup copies are off, so the current file will be replaced.").to_string()
-        };
-        ui.label(RichText::new(on_disk).color(t.text_dim));
+        if let Some(on_disk) = &on_disk {
+            ui.label(RichText::new(on_disk).color(t.text_dim));
+        }
         ui.add_space(10.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let size = vec2(96.0, 22.0);

@@ -366,11 +366,16 @@ fn should_pick_file_path(id: &str, params: &Value) -> bool {
 }
 
 /// A user's QSAVE: a drawing with no file yet picks one, and saving over a file that would lose
-/// content asks first. `None` lets the engine save. JSON calls carry params and never get here;
+/// content asks first. Where there is no file system, a drawing opened from its contents saves
+/// back as the file it came from ([`CadApp::own_file_name`]). `None` lets the engine save. JSON calls carry params and never get here;
 /// they report the loss in their result instead.
 fn user_qsave(app: &mut CadApp) -> Option<Result<Value, String>> {
     if app.session.state().is_ok_and(|s| s.path.is_none()) {
-        return run_ui_command(app, "ui.saveas", &Value::Null);
+        let Some(name) = app.own_file_name() else { return run_ui_command(app, "ui.saveas", &Value::Null) };
+        if app.hold_lossy_save() {
+            return Some(Ok(Value::Null));
+        }
+        return Some(app.run("qsave", json!({ "path": name })));
     }
     app.hold_lossy_save().then_some(Ok(Value::Null))
 }

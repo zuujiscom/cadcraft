@@ -106,3 +106,53 @@ fn a_hostile_list_of_types_is_capped() {
     assert!(s.ends_with("42 more types"), "{s}");
     cleanup(&path);
 }
+
+/// As [`opened`], but as the web opens a drawing: from its contents, with no path and no file
+/// system. The name is a path here so that this native test can see what was written.
+fn opened_from_contents(tag: &str, file: &str, types: &[&str]) -> (CadApp, PathBuf) {
+    let (_, written) = opened(tag, &[]);
+    let name = written.with_file_name(file);
+    let _ = std::fs::remove_file(&written);
+    let mut d = Drawing::new_metric();
+    for t in types {
+        d.add(&Space::Model, Common::default(), unknown(t)).unwrap();
+    }
+    let mut s = Session::empty();
+    let i = s.open_drawing(d, "unused", None);
+    s.docs[i].title = name.to_string_lossy().into_owned();
+    let services = Services { no_file_system: true, ..Services::default() };
+    (CadApp::new(s, services), name)
+}
+
+#[test]
+fn without_a_file_system_save_writes_the_file_the_drawing_came_from() {
+    for file in ["Plan.dwg", "Plan.DXF", "Title block.dwt"] {
+        let (mut app, name) = opened_from_contents("own", file, &[]);
+        menus::activate(&mut app, "qsave");
+        assert!(app.save_loss.is_none());
+        assert!(name.exists(), "{file} is written under its own name");
+        let st = app.session.state().unwrap();
+        assert_eq!(st.path.as_deref(), Some(&*name.to_string_lossy()));
+        assert!(!st.is_dirty());
+        cleanup(&name);
+    }
+}
+
+#[test]
+fn without_a_file_system_a_lossy_save_still_asks_first() {
+    let (mut app, name) = opened_from_contents("ownloss", "Plan.dwg", &["MLINE"]);
+    menus::activate(&mut app, "qsave");
+    assert_eq!(app.save_loss.as_ref().map(Pending::summary).as_deref(), Some("1 MLINE"));
+    assert!(!name.exists(), "nothing is written before the answer");
+
+    app.answer_save_loss(Choice::Cancel);
+    assert!(!name.exists());
+
+    menus::activate(&mut app, "qsave");
+    app.answer_save_loss(Choice::SaveAnyway);
+    assert!(name.exists());
+
+    menus::activate(&mut app, "qsave");
+    assert!(app.save_loss.is_none(), "already agreed to");
+    cleanup(&name);
+}
